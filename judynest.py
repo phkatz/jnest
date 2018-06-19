@@ -24,42 +24,78 @@ and this is what I've implemented.
 import sys
 import time
 import pprint
+import pickle
 import requests
 import json
 
+# Simulator
+CLIENT_ID = r'3c28905c-e2db-4656-872d-c301d5719860'
+CLIENT_SECRET = r'VeiCBX7lnXqP6JoB52TajPWvA'
 
-# TODO: These should be read from a file
-# The following are for the JudyTest OAUTH client:
-redirect_uri = None
+AUTH_URL = 'https://api.home.nest.com/oauth2/access_token'
 API_URL = "https://developer-api.nest.com"
+
+CFG_FILE = "judynest.cfg"
+TKN_FILE = "judynest.tkn"
 
 # TODO: Make sure all HTTP requests have a timeout
 
-def req_access_token(pin):
-    auth_url = 'https://api.home.nest.com/oauth2/access_token'
-    client_id = r'3c28905c-e2db-4656-872d-c301d5719860'
-    client_secret = r'VeiCBX7lnXqP6JoB52TajPWvA'
 
-    payload = "client_id=" + client_id \
-              + "&client_secret=" + client_secret \
-              + "&grant_type=authorization_code" \
-              + "&code=" + pin
+def get_access_token():
 
-    headers = {
-        'Content-Type': "application/x-www-form-urlencoded"
-    }
+    if (len(sys.argv) < 2):
+        # No pin specified on command line, so see if we already
+        # have a token file.
+        try:
+            tknf = open(TKN_FILE, 'rb')
+        except OSError:
+            print("*** ERROR: cannot open ", TKN_FILE,
+                  " to read access token!")
+            exit()
+        else:
+            try:
+                token = pickle.load(tknf)
+            except pickle.PickleError:
+                print("*** ERROR: cannot read token from ", TKN_FILE)
+                exit()
+            else:
+                tknf.close()
+    else:
+        # Pin was specified, so get a new token
+        pin = sys.argv[1]
 
-    response = requests.request("POST", auth_url, 
-                                data=payload, headers=headers)
-    resp_data = json.loads(response.text)
+        payload = "client_id=" + CLIENT_ID \
+                  + "&client_secret=" + CLIENT_SECRET \
+                  + "&grant_type=authorization_code" \
+                  + "&code=" + pin
 
-    if response.status_code != 200:
-        print("*** ERROR!!! ***")
-        pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(resp_data)
-        exit()
+        headers = {
+            'Content-Type': "application/x-www-form-urlencoded"
+        }
 
-    return resp_data['access_token']
+        response = requests.request("POST", AUTH_URL, 
+                                    data=payload, headers=headers)
+        resp_data = json.loads(response.text)
+
+        if response.status_code != 200:
+            print("*** ERROR!!! ***")
+            pp = pprint.PrettyPrinter(indent=4)
+            pp.pprint(resp_data)
+            exit()
+
+        token = resp_data['access_token']
+        # Save the token to file so we can use it next time
+        try:
+            tknf = open(TKN_FILE, 'wb')
+        except OSError:
+            print("*** ERROR: cannot open ", TKN_FILE,
+                  " to save access token!")
+            exit()
+        else:
+            pickle.dump(token, tknf)
+            tknf.close()
+
+    return token
 
 
 
@@ -80,10 +116,7 @@ def read_device(token):
 ################################
 # main
 ################################
-if (len(sys.argv) < 2):
-    print("Specify the pin")
-    exit()
 
-token = req_access_token(sys.argv[1])
+token = get_access_token()
 read_device(token)
 
