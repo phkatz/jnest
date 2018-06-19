@@ -28,6 +28,8 @@ import pickle
 import requests
 import json
 
+SLEEP_TIME = 5
+
 # Simulator
 CLIENT_ID = r'3c28905c-e2db-4656-872d-c301d5719860'
 CLIENT_SECRET = r'VeiCBX7lnXqP6JoB52TajPWvA'
@@ -110,7 +112,17 @@ def read_device(token):
         response = requests.get(response.headers['Location'], 
                                 headers=headers, allow_redirects=False)
 
-    print(response.text)
+    resp_data = json.loads(response.text)
+    devices = resp_data['devices']
+    thermos = devices['thermostats']
+    # We don't know the name of the thermostat, but there should be
+    # only 1, so just get the first
+    key = list(thermos.keys())[0]
+    nest = thermos[key]
+
+    #pp = pprint.PrettyPrinter(indent=4)
+    #pp.pprint(nest)
+    return nest
 
 
 ################################
@@ -118,5 +130,11 @@ def read_device(token):
 ################################
 
 token = get_access_token()
-read_device(token)
+
+# Loop forever, monitoring the thermostat and making adjustments
+# as needed.
+while (True):
+    stat = read_device(token)
+    print("Target temp is: {}".format(stat['target_temperature_f']))
+    time.sleep(SLEEP_TIME)
 
