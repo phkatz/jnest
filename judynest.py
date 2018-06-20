@@ -28,7 +28,9 @@ import pickle
 import requests
 import json
 
-SLEEP_TIME = 5
+POLL_TIME = 5
+COOL_TARGET = 77
+HEAT_TARGET = 75
 
 # Simulator
 CLIENT_ID = r'3c28905c-e2db-4656-872d-c301d5719860'
@@ -39,6 +41,8 @@ API_URL = "https://developer-api.nest.com"
 
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
+
+redirect_url = None
 
 # TODO: Make sure all HTTP requests have a timeout
 
@@ -102,14 +106,23 @@ def get_access_token():
 
 
 def read_device(token):
+    global redirect_url
+
     headers = {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
     }
 
-    response = requests.get(API_URL, headers=headers, allow_redirects=False)
+    if (redirect_url is None):
+        url = API_URL
+    else:
+        url = redirect_url
+
+    response = requests.get(url, headers=headers, allow_redirects=False)
     if response.status_code == 307:
-        response = requests.get(response.headers['Location'], 
+        redirect_url = response.headers['Location']
+        print("Redirecting to ", redirect_url)
+        response = requests.get(redirect_url,
                                 headers=headers, allow_redirects=False)
 
     resp_data = json.loads(response.text)
@@ -125,6 +138,13 @@ def read_device(token):
     return nest
 
 
+def set_device(token, parm, value):
+    headers = {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+    }
+
+
 ################################
 # main
 ################################
@@ -135,6 +155,28 @@ token = get_access_token()
 # as needed.
 while (True):
     stat = read_device(token)
-    print("Target temp is: {}".format(stat['target_temperature_f']))
-    time.sleep(SLEEP_TIME)
+    ambient = stat['ambient_temperature_f']
+    mode = stat['hvac_mode']
+    target = stat['target_temperature_f']
+
+    if (mode == 'heat'):
+        # If H and Tm > Ts + 2 and Tm > 77, turn on C and set Ts = 77
+        if (ambient > target+2 and ambient > COOL_TARGET):
+            set_device(token, 'hvac_mode', 'cool')
+            set_device(token, 'target_temperature_f', 77)
+    elif (mode == 'cool'):
+        # If C and Tm < Ts - 2 and Tm < 75, turn on H and set Ts = 75
+        if (ambient < target-2 and ambient < HEAT_TARGET):
+            set_device(token, 'hvac_mode', 'heat')
+            set_device(token, 'target_temperature_f', HEAT_TARGET)
+    elif (mode == 'heat-cool' or mode == 'eco'):
+        if (ambient <= COOL_TARGET):
+            set_device(token, 'hvac_mode', 'heat')
+            set_device(token, 'target_temperature_f', HEAT_TARGET)
+        else:
+            set_device(token, 'hvac_mode', 'cool')
+            set_device(token, 'target_temperature_f', COOL_TARGET)
+
+    print("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+    time.sleep(POLL_TIME)
 
