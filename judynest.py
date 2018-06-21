@@ -42,7 +42,8 @@ API_URL = "https://developer-api.nest.com"
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
 
-redirect_url = None
+read_redirect_url = None
+write_redirect_url = None
 
 # TODO: Make sure all HTTP requests have a timeout
 
@@ -106,24 +107,30 @@ def get_access_token():
 
 
 def read_device(token):
-    global redirect_url
+    global read_redirect_url
 
     headers = {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
     }
 
-    if (redirect_url is None):
+    if (read_redirect_url is None):
         url = API_URL
     else:
-        url = redirect_url
+        url = read_redirect_url
 
     response = requests.get(url, headers=headers, allow_redirects=False)
     if response.status_code == 307:
-        redirect_url = response.headers['Location']
-        print("In read_device redirecting to ", redirect_url)
-        response = requests.get(redirect_url,
+        read_redirect_url = response.headers['Location']
+        print("In read_device redirecting to ", read_redirect_url)
+        response = requests.get(read_redirect_url,
                                 headers=headers, allow_redirects=False)
+
+    if response.status_code != 200:
+        print("*** ERROR!!! ***")
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(resp_data)
+        exit()
 
     resp_data = json.loads(response.text)
     devices = resp_data['devices']
@@ -139,6 +146,8 @@ def read_device(token):
 
 
 def set_device(token, device_id, parm, value):
+    global write_redirect_url
+
     headers = {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
@@ -149,26 +158,26 @@ def set_device(token, device_id, parm, value):
     else:
         payload = "{\"" + parm + "\": " + str(value) + "}"
 
-    print("NOW payload='{}'".format(payload))
 
-#    if (redirect_url is None):
-#        url = API_URL
-#    else:
-#        url = redirect_url
-#
-#    url += "/" + device_id
-    url = API_URL + "/devices/thermostats/" + device_id
+    if (write_redirect_url is None):
+        url = API_URL + "/devices/thermostats/" + device_id
+    else:
+        url = write_redirect_url
 
     response = requests.put(url, 
                             headers=headers, data=payload, 
                             allow_redirects=False)
     if response.status_code == 307:
-        xredirect_url = response.headers['Location']
-        print("In set_device redirecting to ", xredirect_url)
-        response = requests.put(xredirect_url, 
+        write_redirect_url = response.headers['Location']
+        print("In set_device redirecting to ", write_redirect_url)
+        response = requests.put(write_redirect_url, 
                                 headers=headers, data=payload, 
                                 allow_redirects=False)
-    print("In set_device with response code {}".format(response.status_code)) # hack
+    if response.status_code != 200:
+        print("*** ERROR!!! ***")
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(resp_data)
+        exit()
 
 ################################
 # main
