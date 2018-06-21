@@ -121,7 +121,7 @@ def read_device(token):
     response = requests.get(url, headers=headers, allow_redirects=False)
     if response.status_code == 307:
         redirect_url = response.headers['Location']
-        print("Redirecting to ", redirect_url)
+        print("In read_device redirecting to ", redirect_url)
         response = requests.get(redirect_url,
                                 headers=headers, allow_redirects=False)
 
@@ -138,12 +138,39 @@ def read_device(token):
     return nest
 
 
-def set_device(token, parm, value):
+def set_device(token, device_id, parm, value):
+#    global redirect_url
+
     headers = {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
     }
 
+    #payload = '{"' + parm + '": ' + str(value) + '}'
+    #payload = {parm : str(value)}
+    #payload = {parm : value}
+    #payload = '{"target_termperature_f": "77"}'
+    #payload = "{\"temperature_scale\": \"F\"}"
+    payload = "{\"target_temperature_f\": 72}"
+
+#    if (redirect_url is None):
+#        url = API_URL
+#    else:
+#        url = redirect_url
+#
+#    url += "/" + device_id
+    url = API_URL + "/devices/thermostats/" + device_id
+
+    response = requests.put(url, 
+                            headers=headers, data=payload, 
+                            allow_redirects=False)
+    if response.status_code == 307:
+        xredirect_url = response.headers['Location']
+        print("In set_device redirecting to ", xredirect_url)
+        response = requests.put(xredirect_url, 
+                                headers=headers, data=payload, 
+                                allow_redirects=False)
+    print("In set_device with response code {}".format(response.status_code)) # hack
 
 ################################
 # main
@@ -158,24 +185,25 @@ while (True):
     ambient = stat['ambient_temperature_f']
     mode = stat['hvac_mode']
     target = stat['target_temperature_f']
+    device_id = stat['device_id']
 
     if (mode == 'heat'):
         # If H and Tm > Ts + 2 and Tm > 77, turn on C and set Ts = 77
         if (ambient > target+2 and ambient > COOL_TARGET):
-            set_device(token, 'hvac_mode', 'cool')
-            set_device(token, 'target_temperature_f', 77)
+            set_device(token, device_id, 'hvac_mode', 'cool')
+            set_device(token, device_id, 'target_temperature_f', 77)
     elif (mode == 'cool'):
         # If C and Tm < Ts - 2 and Tm < 75, turn on H and set Ts = 75
         if (ambient < target-2 and ambient < HEAT_TARGET):
-            set_device(token, 'hvac_mode', 'heat')
-            set_device(token, 'target_temperature_f', HEAT_TARGET)
+            set_device(token, device_id, 'hvac_mode', 'heat')
+            set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
     elif (mode == 'heat-cool' or mode == 'eco'):
         if (ambient <= COOL_TARGET):
-            set_device(token, 'hvac_mode', 'heat')
-            set_device(token, 'target_temperature_f', HEAT_TARGET)
+            set_device(token, device_id, 'hvac_mode', 'heat')
+            set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
         else:
-            set_device(token, 'hvac_mode', 'cool')
-            set_device(token, 'target_temperature_f', COOL_TARGET)
+            set_device(token, device_id, 'hvac_mode', 'cool')
+            set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
 
     print("Target={}, ambient={}, mode={}".format(target, ambient, mode))
     time.sleep(POLL_TIME)
