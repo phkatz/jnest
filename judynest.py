@@ -139,19 +139,17 @@ def read_device(token):
 
 
 def set_device(token, device_id, parm, value):
-#    global redirect_url
-
     headers = {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
     }
 
-    #payload = '{"' + parm + '": ' + str(value) + '}'
-    #payload = {parm : str(value)}
-    #payload = {parm : value}
-    #payload = '{"target_termperature_f": "77"}'
-    #payload = "{\"temperature_scale\": \"F\"}"
-    payload = "{\"target_temperature_f\": 72}"
+    if (type(value) is str):
+        payload = "{\"" + parm + "\": \"" + value + "\"}"
+    else:
+        payload = "{\"" + parm + "\": " + str(value) + "}"
+
+    print("NOW payload='{}'".format(payload))
 
 #    if (redirect_url is None):
 #        url = API_URL
