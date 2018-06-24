@@ -19,14 +19,50 @@ requests library will not replicate the authentication information on
 the redirect, causing API accesses to fail. A workaround is described 
 here: https://github.com/requests/requests/issues/2949
 and this is what I've implemented.
+
+TODO:
+    1. timeouts on all HTTP requests.
+
+    2. Handle cached redirect URL going bad.
+
+    X. Generate log file of decision activity
+
+    -. SMS or email notification
+       (Use IOS app to SSH into VM and view log files or kill
+       app)
+
+    5. Move CLIENT_ID and CLIENT_SECRET to cfg file
+
+    6. Change token from pickle to json, maybe in same
+       config file as CLIENT_ID and CLIENT_SECRET?
+
+    7. Notifications via SMS (twilio.com)
+
+    8. State machine architecture for handling things like
+       thermostat being set to Off mode
+
+    9. Handle case where temp is above AC range, but mom has set
+       to heat so it won't be cold in the morning.
+
+    10. Use existence of a file to trigger enable/disable of
+        program operation so can ssh from phone and control
+        whether program runs or not.
+
 """
 
 import sys
 import time
+import logging
 import pprint
 import pickle
 import requests
 import json
+import argparse
+
+from logging.handlers import RotatingFileHandler
+
+LOGFILE = 'jnest.log'
+LOGFILESIZE = 20000
 
 POLL_TIME = 5
 COOL_TARGET = 77
@@ -45,8 +81,6 @@ TKN_FILE = "judynest.tkn"
 read_redirect_url = None
 write_redirect_url = None
 
-# TODO: Make sure all HTTP requests have a timeout
-
 
 def get_access_token():
 
@@ -56,14 +90,13 @@ def get_access_token():
         try:
             tknf = open(TKN_FILE, 'rb')
         except OSError:
-            print("*** ERROR: cannot open ", TKN_FILE,
-                  " to read access token!")
+            log.error("Cannot open %s to read access token" % TKN_FILE)
             exit()
         else:
             try:
                 token = pickle.load(tknf)
             except pickle.PickleError:
-                print("*** ERROR: cannot read token from ", TKN_FILE)
+                log.error("Cannot read token from %s" % TKN_FILE)
                 exit()
             else:
                 tknf.close()
@@ -85,9 +118,9 @@ def get_access_token():
         resp_data = json.loads(response.text)
 
         if response.status_code != 200:
-            print("*** ERROR!!! ***")
             pp = pprint.PrettyPrinter(indent=4)
-            pp.pprint(resp_data)
+            rsp = pp.pformat(resp_data)
+            log.error("Post request response code: %s" % rsp)
             exit()
 
         token = resp_data['access_token']
@@ -95,8 +128,7 @@ def get_access_token():
         try:
             tknf = open(TKN_FILE, 'wb')
         except OSError:
-            print("*** ERROR: cannot open ", TKN_FILE,
-                  " to save access token!")
+            log.error("Cannot open %s to save access token" % TKN_FILE)
             exit()
         else:
             pickle.dump(token, tknf)
@@ -122,14 +154,14 @@ def read_device(token):
     response = requests.get(url, headers=headers, allow_redirects=False)
     if response.status_code == 307:
         read_redirect_url = response.headers['Location']
-        print("In read_device redirecting to ", read_redirect_url)
+        log.debug("In read_device redirecting to %s" % read_redirect_url)
         response = requests.get(read_redirect_url,
                                 headers=headers, allow_redirects=False)
 
     if response.status_code != 200:
-        print("*** ERROR!!! ***")
         pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(resp_data)
+        rsp = pp.pformat(resp_data)
+        log.error("Get request response code: %s" % rsp)
         exit()
 
     resp_data = json.loads(response.text)
@@ -169,19 +201,42 @@ def set_device(token, device_id, parm, value):
                             allow_redirects=False)
     if response.status_code == 307:
         write_redirect_url = response.headers['Location']
-        print("In set_device redirecting to ", write_redirect_url)
+        log.debug("In set_device redirecting to %s" % write_redirect_url)
         response = requests.put(write_redirect_url, 
                                 headers=headers, data=payload, 
                                 allow_redirects=False)
     if response.status_code != 200:
-        print("*** ERROR!!! ***")
         pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(resp_data)
+        rsp = pp.pformat(resp_data)
+        log.error("Put request response code: %s" % rsp)
         exit()
 
 ################################
 # main
 ################################
+
+# Set up logger
+log = logging.getLogger('')
+log.setLevel(logging.DEBUG)
+format = logging.Formatter("%(asctime)s (%(name)s) [%(levelname)s]: %(message)s")
+
+ch = logging.StreamHandler(sys.stdout)
+ch.setFormatter(format)
+log.addHandler(ch)
+
+fh = RotatingFileHandler(LOGFILE, maxBytes=LOGFILESIZE, backupCount=5)
+fh.setFormatter(format)
+log.addHandler(fh)
+
+#parser = argparse.ArgumentParser(description='Process some integers.')
+#parser.add_argument('integers', metavar='N', type=int, nargs='+',
+#                    help='an integer for the accumulator')
+#parser.add_argument('--sum', dest='accumulate', action='store_const',
+#                    const=sum, default=max,
+#                    help='sum the integers (default: find the max)')
+#
+#args = parser.parse_args()
+#print(args.accumulate(args.integers))
 
 token = get_access_token()
 
@@ -212,6 +267,6 @@ while (True):
             set_device(token, device_id, 'hvac_mode', 'cool')
             set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
 
-    print("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+    log.info("Target={}, ambient={}, mode={}".format(target, ambient, mode))
     time.sleep(POLL_TIME)
 
