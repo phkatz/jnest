@@ -64,7 +64,7 @@ from logging.handlers import RotatingFileHandler
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
 
-POLL_TIME = 5
+MIN_POLL_TIME = 65
 COOL_TARGET = 77
 HEAT_TARGET = 75
 
@@ -77,6 +77,14 @@ API_URL = "https://developer-api.nest.com"
 
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
+
+FAKE_KEY = "c.fakekey123"
+fake_stats = {
+        'ambient_temperature_f': 70,
+        'hvac_mode': 'heat',
+        'target_temperature_f': 70,
+        'device_id': 'fake_device_123',
+}
 
 read_redirect_url = None
 write_redirect_url = None
@@ -154,6 +162,10 @@ def read_device(token):
     else:
         url = read_redirect_url
 
+    if (args.sim):
+        log.debug("Returning fake stats for sim mode.")
+        return fake_stats
+        
     response = requests.get(url, headers=headers, allow_redirects=False)
     if response.status_code == 307:
         read_redirect_url = response.headers['Location']
@@ -201,6 +213,11 @@ def set_device(token, device_id, parm, value):
     else:
         url = write_redirect_url
 
+    if (args.sim):
+        log.debug("Faking Put to set parameter.")
+        fake_stats[parm] = value
+        return
+
     response = requests.put(url, 
                             headers=headers, data=payload, 
                             allow_redirects=False)
@@ -233,6 +250,15 @@ parser.add_argument('-d', '--debug',
                     action="store_const", dest="loglevel", const=logging.DEBUG,
                     default=logging.INFO,
 )
+parser.add_argument('-s', '--sim',
+                    help="Fake calls to Nest API (to prevent blocking)",
+                    action="store_true"
+)
+parser.add_argument('-r', '--rate',
+                    help="Poll rate in seconds (forces --sim if <%d)" % MIN_POLL_TIME,
+                    default=MIN_POLL_TIME,
+                    type=int,
+)
 parser.add_argument('-q', '--quiet',
                     help="Suppress info log messages",
                     action="store_const", dest="loglevel", const=logging.WARNING,
@@ -253,6 +279,10 @@ fh = RotatingFileHandler(LOGFILE, maxBytes=LOGFILESIZE, backupCount=5)
 fh.setFormatter(format)
 fh.setLevel(logging.DEBUG)
 log.addHandler(fh)
+
+# If using a short poll rate, force --sim to prevent blocking
+if (args.rate < MIN_POLL_TIME):
+    args.sim = True
 
 token = get_access_token()
 
@@ -293,5 +323,5 @@ while (True):
     lastmode = mode
     lasttarg = target
     lastamb = ambient
-    time.sleep(POLL_TIME)
+    time.sleep(args.rate)
 
