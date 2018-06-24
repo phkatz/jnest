@@ -44,12 +44,13 @@ TODO:
     9. Handle case where temp is above AC range, but mom has set
        to heat so it won't be cold in the morning.
 
-    10. Use existence of a file to trigger enable/disable of
+    xx. Use existence of a file to trigger enable/disable of
         program operation so can ssh from phone and control
         whether program runs or not.
 
 """
 
+import os
 import sys
 import time
 import logging
@@ -77,6 +78,7 @@ API_URL = "https://developer-api.nest.com"
 
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
+ENABLE_FILE = "gojnest"
 
 FAKE_KEY = "c.fakekey123"
 fake_stats = {
@@ -290,9 +292,26 @@ lastmode = 'off'
 lasttarg = 0
 lastamb = 0
 
+# Create the enable file when we first start up
+lastenab = True
+open(ENABLE_FILE, 'w').close()
+
 # Loop forever, monitoring the thermostat and making adjustments
 # as needed.
 while (True):
+    time.sleep(args.rate)
+    
+    # Idle if the enable file is not present
+    if not os.path.isfile(ENABLE_FILE):
+        if (lastenab):
+            lastenab = False
+            log.info("Idling - file '%s' is missing." % ENABLE_FILE)
+        continue;
+    else:
+        if (not lastenab):
+            lastenab = True
+            log.info("Un-idling - file '%s' is present." % ENABLE_FILE)
+
     stat = read_device(token)
     ambient = stat['ambient_temperature_f']
     mode = stat['hvac_mode']
@@ -323,5 +342,4 @@ while (True):
     lastmode = mode
     lasttarg = target
     lastamb = ambient
-    time.sleep(args.rate)
 
