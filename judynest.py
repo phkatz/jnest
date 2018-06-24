@@ -62,7 +62,7 @@ import argparse
 from logging.handlers import RotatingFileHandler
 
 LOGFILE = 'jnest.log'
-LOGFILESIZE = 20000
+LOGFILESIZE = 500000
 
 POLL_TIME = 5
 COOL_TARGET = 77
@@ -91,12 +91,14 @@ def get_access_token():
             tknf = open(TKN_FILE, 'rb')
         except OSError:
             log.error("Cannot open %s to read access token" % TKN_FILE)
+            log.critical("Terminating program.")
             exit()
         else:
             try:
                 token = pickle.load(tknf)
             except pickle.PickleError:
                 log.error("Cannot read token from %s" % TKN_FILE)
+                log.critical("Terminating program.")
                 exit()
             else:
                 tknf.close()
@@ -118,7 +120,9 @@ def get_access_token():
         if response.status_code != 200:
             pp = pprint.PrettyPrinter(indent=4)
             rsp = pp.pformat(resp_data)
-            log.error("Post request response code: %s" % rsp)
+            log.error("Post request response code: %d" % response.status_code)
+            log.error("Post response message: %s" % rsp)
+            log.critical("Terminating program.")
             exit()
 
         token = resp_data['access_token']
@@ -127,6 +131,7 @@ def get_access_token():
             tknf = open(TKN_FILE, 'wb')
         except OSError:
             log.error("Cannot open %s to save access token" % TKN_FILE)
+            log.critical("Terminating program.")
             exit()
         else:
             pickle.dump(token, tknf)
@@ -156,13 +161,15 @@ def read_device(token):
         response = requests.get(read_redirect_url,
                                 headers=headers, allow_redirects=False)
 
+    resp_data = json.loads(response.text)
     if response.status_code != 200:
         pp = pprint.PrettyPrinter(indent=4)
         rsp = pp.pformat(resp_data)
-        log.error("Get request response code: %s" % rsp)
+        log.error("Get request response code: %d" % response.status_code)
+        log.error("Get response message: %s" % rsp)
+        log.critical("Terminating program.")
         exit()
 
-    resp_data = json.loads(response.text)
     devices = resp_data['devices']
     thermos = devices['thermostats']
     # We don't know the name of the thermostat, but there should be
@@ -203,10 +210,13 @@ def set_device(token, device_id, parm, value):
         response = requests.put(write_redirect_url, 
                                 headers=headers, data=payload, 
                                 allow_redirects=False)
+    resp_data = json.loads(response.text)
     if response.status_code != 200:
         pp = pprint.PrettyPrinter(indent=4)
         rsp = pp.pformat(resp_data)
-        log.error("Put request response code: %s" % rsp)
+        log.error("Put request response code: %d" % response.status_code)
+        log.error("Put response message: %s" % rsp)
+        log.critical("Terminating program.")
         exit()
 
 ################################
@@ -246,6 +256,10 @@ log.addHandler(fh)
 
 token = get_access_token()
 
+lastmode = 'off'
+lasttarg = 0
+lastamb = 0
+
 # Loop forever, monitoring the thermostat and making adjustments
 # as needed.
 while (True):
@@ -255,17 +269,17 @@ while (True):
     target = stat['target_temperature_f']
     device_id = stat['device_id']
 
-    if (mode == 'heat'):
+    if (mode == 'heat' and mode == lastmode):
         # If H and Tm > Ts + 2 and Tm > 77, turn on C and set Ts = 77
         if (ambient > target+2 and ambient > COOL_TARGET):
             set_device(token, device_id, 'hvac_mode', 'cool')
             set_device(token, device_id, 'target_temperature_f', 77)
-    elif (mode == 'cool'):
+    elif (mode == 'cool' and mode == lastmode):
         # If C and Tm < Ts - 2 and Tm < 75, turn on H and set Ts = 75
         if (ambient < target-2 and ambient < HEAT_TARGET):
             set_device(token, device_id, 'hvac_mode', 'heat')
             set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
-    elif (mode == 'heat-cool' or mode == 'eco'):
+    elif ((mode == 'heat-cool' or mode == 'eco') and mode == lastmode):
         if (ambient <= COOL_TARGET):
             set_device(token, device_id, 'hvac_mode', 'heat')
             set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
@@ -273,6 +287,11 @@ while (True):
             set_device(token, device_id, 'hvac_mode', 'cool')
             set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
 
-    log.info("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+    if (mode != lastmode or target != lasttarg or ambient != lastamb):
+        log.info("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+
+    lastmode = mode
+    lasttarg = target
+    lastamb = ambient
     time.sleep(POLL_TIME)
 
