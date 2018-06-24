@@ -213,7 +213,7 @@ def set_device(token, device_id, parm, value):
 # main
 ################################
 
-# Parse command line
+# Parse command line options
 parser = argparse.ArgumentParser(description='Nest thermostat monitoring and control.')
 parser.add_argument('-p', '--pin',
                     help='Speicfy authentication PIN'
@@ -231,15 +231,17 @@ args = parser.parse_args()
 
 # Set up logger
 log = logging.getLogger('')
-log.setLevel(args.loglevel)
+log.setLevel(logging.DEBUG)
 format = logging.Formatter("%(asctime)s (%(name)s) [%(levelname)s]: %(message)s")
 
 ch = logging.StreamHandler(sys.stdout)
 ch.setFormatter(format)
+ch.setLevel(args.loglevel)
 log.addHandler(ch)
 
 fh = RotatingFileHandler(LOGFILE, maxBytes=LOGFILESIZE, backupCount=5)
 fh.setFormatter(format)
+fh.setLevel(logging.DEBUG)
 log.addHandler(fh)
 
 token = get_access_token()
