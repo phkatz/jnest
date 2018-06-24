@@ -84,7 +84,7 @@ write_redirect_url = None
 
 def get_access_token():
 
-    if (len(sys.argv) < 2):
+    if (args.pin is None):
         # No pin specified on command line, so see if we already
         # have a token file.
         try:
@@ -102,12 +102,10 @@ def get_access_token():
                 tknf.close()
     else:
         # Pin was specified, so get a new token
-        pin = sys.argv[1]
-
         payload = "client_id=" + CLIENT_ID \
                   + "&client_secret=" + CLIENT_SECRET \
                   + "&grant_type=authorization_code" \
-                  + "&code=" + pin
+                  + "&code=" + args.pin
 
         headers = {
             'Content-Type': "application/x-www-form-urlencoded"
@@ -215,9 +213,25 @@ def set_device(token, device_id, parm, value):
 # main
 ################################
 
+# Parse command line
+parser = argparse.ArgumentParser(description='Nest thermostat monitoring and control.')
+parser.add_argument('-p', '--pin',
+                    help='Speicfy authentication PIN'
+)
+parser.add_argument('-d', '--debug',
+                    help="Log debug messages",
+                    action="store_const", dest="loglevel", const=logging.DEBUG,
+                    default=logging.INFO,
+)
+parser.add_argument('-q', '--quiet',
+                    help="Suppress info log messages",
+                    action="store_const", dest="loglevel", const=logging.WARNING,
+)
+args = parser.parse_args()
+
 # Set up logger
 log = logging.getLogger('')
-log.setLevel(logging.DEBUG)
+log.setLevel(args.loglevel)
 format = logging.Formatter("%(asctime)s (%(name)s) [%(levelname)s]: %(message)s")
 
 ch = logging.StreamHandler(sys.stdout)
@@ -227,16 +241,6 @@ log.addHandler(ch)
 fh = RotatingFileHandler(LOGFILE, maxBytes=LOGFILESIZE, backupCount=5)
 fh.setFormatter(format)
 log.addHandler(fh)
-
-#parser = argparse.ArgumentParser(description='Process some integers.')
-#parser.add_argument('integers', metavar='N', type=int, nargs='+',
-#                    help='an integer for the accumulator')
-#parser.add_argument('--sum', dest='accumulate', action='store_const',
-#                    const=sum, default=max,
-#                    help='sum the integers (default: find the max)')
-#
-#args = parser.parse_args()
-#print(args.accumulate(args.integers))
 
 token = get_access_token()
 
