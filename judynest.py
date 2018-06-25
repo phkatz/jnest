@@ -21,13 +21,6 @@ here: https://github.com/requests/requests/issues/2949
 and this is what I've implemented.
 
 TODO:
-    1. timeouts on all HTTP requests.
-
-    2. Handle cached redirect URL going bad.
-
-    6. Change token from pickle to json, maybe in same
-       config file as CLIENT_ID and CLIENT_SECRET?
-
     7. Notifications via SMS (twilio.com)
 
 """
@@ -44,15 +37,19 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
+Version = "1.0 (6/24/2018)"
+
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
 
-MIN_POLL_TIME = 65
+POLL_TIME = 65
+MIN_POLL_TIME = 5
 COOL_TARGET = 77
 HEAT_TARGET = 75
 
 AUTH_URL = 'https://api.home.nest.com/oauth2/access_token'
 API_URL = "https://developer-api.nest.com"
+HTTP_TIMEOUT = 30
 
 # File names
 CFG_FILE = "judynest.cfg"
@@ -103,8 +100,19 @@ def get_access_token():
             'Content-Type': "application/x-www-form-urlencoded"
         }
 
-        response = requests.request("POST", AUTH_URL, 
-                                    data=payload, headers=headers)
+
+        try:
+            response = requests.request("POST", 
+                                        AUTH_URL, 
+                                        data=payload, 
+                                        headers=headers,
+                                        timeout=HTTP_TIMEOUT)
+        except (requests.Timeout, requests.ConnectionError) as err:
+            log.error("Post request timed out on url '%s'" % AUTH_URL)
+            log.error("Post timeout error: %s" % err)
+            log.critical("Terminating program.")
+            exit()
+
         resp_data = json.loads(response.text)
 
         if response.status_code != 200:
@@ -148,21 +156,51 @@ def read_device(token):
         log.debug("Returning fake stats for fake mode.")
         return fake_stats
         
-    response = requests.get(url, headers=headers, allow_redirects=False)
-    if response.status_code == 307:
-        read_redirect_url = response.headers['Location']
-        log.debug("In read_device redirecting to %s" % read_redirect_url)
-        response = requests.get(read_redirect_url,
-                                headers=headers, allow_redirects=False)
+    # While loop is in case we need to retry due to 
+    # cached redirect URL being stale.
+    while (True):
+        try:
+            response = requests.get(url, 
+                                    headers=headers, 
+                                    allow_redirects=False,
+                                    timeout=HTTP_TIMEOUT)
+        except (requests.Timeout, requests.ConnectionError) as err:
+            log.error("Get request timed out on url '%s'" % url)
+            log.error("Get time out error: %s" % err)
+            return None
+        else:
+            if response.status_code == 307:
+                read_redirect_url = response.headers['Location']
+                log.debug("In read_device redirecting to %s" % read_redirect_url)
 
-    resp_data = json.loads(response.text)
-    if response.status_code != 200:
-        pp = pprint.PrettyPrinter(indent=4)
-        rsp = pp.pformat(resp_data)
-        log.error("Get request response code: %d" % response.status_code)
-        log.error("Get response message: %s" % rsp)
-        log.critical("Terminating program.")
-        exit()
+                try:
+                    response = requests.get(read_redirect_url,
+                                            headers=headers, 
+                                            allow_redirects=False,
+                                            timeout=HTTP_TIMEOUT)
+                except (requests.Timeout, requests.ConnectionError) as err:
+                    log.error("Get request timed out on redirect url '%s'" % read_redirect_url)
+                    log.error("Get timeout error: %s" % err)
+                    return None
+
+            resp_data = json.loads(response.text)
+            if response.status_code != 200:
+                if (read_redirect_url is None or url != read_redirect_url):
+                    # We didn't get a redirect, or we did and it didn't work
+                    pp = pprint.PrettyPrinter(indent=4)
+                    rsp = pp.pformat(resp_data)
+                    log.error("Get request response code: %d" % response.status_code)
+                    log.error("Get response message: %s" % rsp)
+                    log.critical("Terminating program.")
+                    exit()
+                else:
+                    # We used the cached redirect and it didn't work, so
+                    # try again with the official URL
+                    log.info("Cached redirect URL didn't work - trying '%s'" % API_URL)
+                    url = API_URL
+            else:
+                # Success - no need to loop
+                break;
 
     devices = resp_data['devices']
     thermos = devices['thermostats']
@@ -189,34 +227,68 @@ def set_device(token, device_id, parm, value):
     else:
         payload = "{\"" + parm + "\": " + str(value) + "}"
 
+    parm_url = API_URL + "/devices/thermostats/" + device_id
 
     if (write_redirect_url is None):
-        url = API_URL + "/devices/thermostats/" + device_id
+        url = parm_url
     else:
         url = write_redirect_url
 
     if (args.fake):
         log.debug("Faking Put to set parameter.")
         fake_stats[parm] = value
-        return
+        return True
 
-    response = requests.put(url, 
-                            headers=headers, data=payload, 
-                            allow_redirects=False)
-    if response.status_code == 307:
-        write_redirect_url = response.headers['Location']
-        log.debug("In set_device redirecting to %s" % write_redirect_url)
-        response = requests.put(write_redirect_url, 
-                                headers=headers, data=payload, 
-                                allow_redirects=False)
-    resp_data = json.loads(response.text)
-    if response.status_code != 200:
-        pp = pprint.PrettyPrinter(indent=4)
-        rsp = pp.pformat(resp_data)
-        log.error("Put request response code: %d" % response.status_code)
-        log.error("Put response message: %s" % rsp)
-        log.critical("Terminating program.")
-        exit()
+    # While loop is in case we need to retry due to 
+    # cached redirect URL being stale.
+    while (True):
+        try:
+            response = requests.put(url, 
+                                    headers=headers, 
+                                    data=payload, 
+                                    allow_redirects=False,
+                                    timeout=HTTP_TIMEOUT)
+        except (requests.Timeout, requests.ConnectionError) as err:
+            log.error("Put request timed out on url '%s'" % url)
+            log.error("Put timeout error: %s" % err)
+            return False
+        else:
+            if response.status_code == 307:
+                write_redirect_url = response.headers['Location']
+                log.debug("In set_device redirecting to %s" % write_redirect_url)
+
+                try:
+                    response = requests.put(write_redirect_url, 
+                                            headers=headers, 
+                                            data=payload, 
+                                            allow_redirects=False,
+                                            timeout=HTTP_TIMEOUT)
+                except (requests.Timeout, requests.ConnectionError) as err:
+                    log.error("Put request timed out on redirect url '%s'" % read_redirect_url)
+                    log.error("Put timeout error: %s" % err)
+                    return False
+                
+            resp_data = json.loads(response.text)
+            if response.status_code != 200:
+                if (write_redirect_url is None or url != write_redirect_url):
+                    # We didn't get a redirect, or we did and it didn't work
+                    pp = pprint.PrettyPrinter(indent=4)
+                    rsp = pp.pformat(resp_data)
+                    log.error("Put request response code: %d" % response.status_code)
+                    log.error("Put response message: %s" % rsp)
+                    log.critical("Terminating program.")
+                    exit()
+                else:
+                    # We used the cached redirect and it didn't work, so
+                    # try again with the official URL
+                    log.info("Cached redirect URL didn't work - trying '%s'" % parm_url)
+                    url = parm_url
+            else:
+                # Success - no need to loop
+                break;
+
+    return True
+
 
 ################################
 # main
@@ -238,7 +310,7 @@ parser.add_argument('-f', '--fake',
 )
 parser.add_argument('-r', '--rate',
                     help="Poll rate in seconds (forces --fake if <%d)" % MIN_POLL_TIME,
-                    default=MIN_POLL_TIME,
+                    default=POLL_TIME,
                     type=int,
 )
 parser.add_argument('-q', '--quiet',
@@ -246,6 +318,10 @@ parser.add_argument('-q', '--quiet',
                     action="store_const", dest="loglevel", const=logging.WARNING,
 )
 args = parser.parse_args()
+
+# If using a short poll rate, force --fake to prevent blocking
+if (args.rate < MIN_POLL_TIME):
+    args.fake = True
 
 # Set up logger
 log = logging.getLogger('')
@@ -262,9 +338,7 @@ fh.setFormatter(format)
 fh.setLevel(logging.DEBUG)
 log.addHandler(fh)
 
-# If using a short poll rate, force --fake to prevent blocking
-if (args.rate < MIN_POLL_TIME):
-    args.fake = True
+log.info("{} Version {}".format(sys.argv[0], Version))
 
 # Get configuration  parameters
 try:
@@ -314,31 +388,38 @@ while (True):
             log.info("Un-idling - file '%s' is present." % ENABLE_FILE)
 
     stat = read_device(token)
+    if (stat is None):
+        continue
+
     ambient = stat['ambient_temperature_f']
     mode = stat['hvac_mode']
     target = stat['target_temperature_f']
     device_id = stat['device_id']
 
+    if (mode != lastmode or target != lasttarg or ambient != lastamb):
+        log.info("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+
     if (mode == 'heat' and mode == lastmode):
         # If H and Tm > Ts + 2 and Tm > 77, turn on C and set Ts = 77
         if (ambient > target+2 and ambient > COOL_TARGET):
-            set_device(token, device_id, 'hvac_mode', 'cool')
-            set_device(token, device_id, 'target_temperature_f', 77)
+            if (set_device(token, device_id, 'hvac_mode', 'cool')):
+                set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
+                log.info("Switch from {} to cool to {}".format(mode, COOL_TARGET))
     elif (mode == 'cool' and mode == lastmode):
         # If C and Tm < Ts - 2 and Tm < 75, turn on H and set Ts = 75
         if (ambient < target-2 and ambient < HEAT_TARGET):
-            set_device(token, device_id, 'hvac_mode', 'heat')
-            set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
+            if (set_device(token, device_id, 'hvac_mode', 'heat')):
+                set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
+                log.info("Switch from {} to heat to {}".format(mode, HEAT_TARGET))
     elif ((mode == 'heat-cool' or mode == 'eco') and mode == lastmode):
         if (ambient <= COOL_TARGET):
-            set_device(token, device_id, 'hvac_mode', 'heat')
-            set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
+            if (set_device(token, device_id, 'hvac_mode', 'heat')):
+                set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
+                log.info("Switch from {} to heat to {}".format(mode, HEAT_TARGET))
         else:
-            set_device(token, device_id, 'hvac_mode', 'cool')
-            set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
-
-    if (mode != lastmode or target != lasttarg or ambient != lastamb):
-        log.info("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+            if (set_device(token, device_id, 'hvac_mode', 'cool')):
+                set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
+                log.info("Switch from {} to cool to {}".format(mode, COOL_TARGET))
 
     lastmode = mode
     lasttarg = target
