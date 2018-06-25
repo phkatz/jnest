@@ -25,28 +25,10 @@ TODO:
 
     2. Handle cached redirect URL going bad.
 
-    X. Generate log file of decision activity
-
-    -. SMS or email notification
-       (Use IOS app to SSH into VM and view log files or kill
-       app)
-
-    5. Move CLIENT_ID and CLIENT_SECRET to cfg file
-
     6. Change token from pickle to json, maybe in same
        config file as CLIENT_ID and CLIENT_SECRET?
 
     7. Notifications via SMS (twilio.com)
-
-    8. State machine architecture for handling things like
-       thermostat being set to Off mode
-
-    9. Handle case where temp is above AC range, but mom has set
-       to heat so it won't be cold in the morning.
-
-    xx. Use existence of a file to trigger enable/disable of
-        program operation so can ssh from phone and control
-        whether program runs or not.
 
 """
 
@@ -69,17 +51,15 @@ MIN_POLL_TIME = 65
 COOL_TARGET = 77
 HEAT_TARGET = 75
 
-# Simulator
-CLIENT_ID = r'3c28905c-e2db-4656-872d-c301d5719860'
-CLIENT_SECRET = r'VeiCBX7lnXqP6JoB52TajPWvA'
-
 AUTH_URL = 'https://api.home.nest.com/oauth2/access_token'
 API_URL = "https://developer-api.nest.com"
 
+# File names
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
 ENABLE_FILE = "gojnest"
 
+# Fake out stuff for fake mode
 FAKE_KEY = "c.fakekey123"
 fake_stats = {
         'ambient_temperature_f': 70,
@@ -114,8 +94,8 @@ def get_access_token():
                 tknf.close()
     else:
         # Pin was specified, so get a new token
-        payload = "client_id=" + CLIENT_ID \
-                  + "&client_secret=" + CLIENT_SECRET \
+        payload = "client_id=" + cfg['CLIENT_ID'] \
+                  + "&client_secret=" + cfg['CLIENT_SECRET'] \
                   + "&grant_type=authorization_code" \
                   + "&code=" + args.pin
 
@@ -164,8 +144,8 @@ def read_device(token):
     else:
         url = read_redirect_url
 
-    if (args.sim):
-        log.debug("Returning fake stats for sim mode.")
+    if (args.fake):
+        log.debug("Returning fake stats for fake mode.")
         return fake_stats
         
     response = requests.get(url, headers=headers, allow_redirects=False)
@@ -215,7 +195,7 @@ def set_device(token, device_id, parm, value):
     else:
         url = write_redirect_url
 
-    if (args.sim):
+    if (args.fake):
         log.debug("Faking Put to set parameter.")
         fake_stats[parm] = value
         return
@@ -252,12 +232,12 @@ parser.add_argument('-d', '--debug',
                     action="store_const", dest="loglevel", const=logging.DEBUG,
                     default=logging.INFO,
 )
-parser.add_argument('-s', '--sim',
+parser.add_argument('-f', '--fake',
                     help="Fake calls to Nest API (to prevent blocking)",
                     action="store_true"
 )
 parser.add_argument('-r', '--rate',
-                    help="Poll rate in seconds (forces --sim if <%d)" % MIN_POLL_TIME,
+                    help="Poll rate in seconds (forces --fake if <%d)" % MIN_POLL_TIME,
                     default=MIN_POLL_TIME,
                     type=int,
 )
@@ -282,9 +262,25 @@ fh.setFormatter(format)
 fh.setLevel(logging.DEBUG)
 log.addHandler(fh)
 
-# If using a short poll rate, force --sim to prevent blocking
+# If using a short poll rate, force --fake to prevent blocking
 if (args.rate < MIN_POLL_TIME):
-    args.sim = True
+    args.fake = True
+
+# Get configuration  parameters
+try:
+    cfgf = open(CFG_FILE, 'r')
+except OSError:
+    log.error("Cannot open %s to read configuration." % CFG_FILE)
+    log.critical("Terminating program.")
+    exit()
+else:
+    try:
+        cfg = json.load(cfgf)
+    except json.decoder.JSONDecodeError as err:
+        log.error("Cannot parse configuration from file '%s'" % CFG_FILE)
+        log.error("Parsing error: %s" % err)
+        log.critical("Terminating program.")
+        exit()
 
 token = get_access_token()
 
@@ -296,10 +292,15 @@ lastamb = 0
 lastenab = True
 open(ENABLE_FILE, 'w').close()
 
+init = True
+
 # Loop forever, monitoring the thermostat and making adjustments
 # as needed.
 while (True):
-    time.sleep(args.rate)
+    if (init):
+        init = False
+    else:
+        time.sleep(args.rate)
     
     # Idle if the enable file is not present
     if not os.path.isfile(ENABLE_FILE):
