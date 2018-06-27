@@ -44,8 +44,6 @@ LOGFILESIZE = 500000
 
 POLL_TIME = 65
 MIN_POLL_TIME = 5
-COOL_TARGET = 77
-HEAT_TARGET = 75
 
 AUTH_URL = 'https://api.home.nest.com/oauth2/access_token'
 API_URL = "https://developer-api.nest.com"
@@ -401,25 +399,25 @@ while (True):
 
     if (mode == 'heat' and mode == lastmode):
         # If H and Tm > Ts + 2 and Tm > 77, turn on C and set Ts = 77
-        if (ambient > target+2 and ambient > COOL_TARGET):
+        if (ambient > target+2 and ambient > cfg['COOL_TARGET']):
             if (set_device(token, device_id, 'hvac_mode', 'cool')):
-                set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
-                log.info("Switch from {} to cool to {}".format(mode, COOL_TARGET))
+                set_device(token, device_id, 'target_temperature_f', cfg['COOL_TARGET'])
+                log.info("Switch from {} to cool to {}".format(mode, cfg['COOL_TARGET']))
     elif (mode == 'cool' and mode == lastmode):
         # If C and Tm < Ts - 2 and Tm < 75, turn on H and set Ts = 75
-        if (ambient < target-2 and ambient < HEAT_TARGET):
+        if (ambient < target-2 and ambient < cfg['HEAT_TARGET']):
             if (set_device(token, device_id, 'hvac_mode', 'heat')):
-                set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
-                log.info("Switch from {} to heat to {}".format(mode, HEAT_TARGET))
+                set_device(token, device_id, 'target_temperature_f', cfg['HEAT_TARGET'])
+                log.info("Switch from {} to heat to {}".format(mode, cfg['HEAT_TARGET']))
     elif ((mode == 'heat-cool' or mode == 'eco') and mode == lastmode):
-        if (ambient <= COOL_TARGET):
+        if (ambient <= cfg['COOL_TARGET']):
             if (set_device(token, device_id, 'hvac_mode', 'heat')):
-                set_device(token, device_id, 'target_temperature_f', HEAT_TARGET)
-                log.info("Switch from {} to heat to {}".format(mode, HEAT_TARGET))
+                set_device(token, device_id, 'target_temperature_f', cfg['HEAT_TARGET'])
+                log.info("Switch from {} to heat to {}".format(mode, cfg['HEAT_TARGET']))
         else:
             if (set_device(token, device_id, 'hvac_mode', 'cool')):
-                set_device(token, device_id, 'target_temperature_f', COOL_TARGET)
-                log.info("Switch from {} to cool to {}".format(mode, COOL_TARGET))
+                set_device(token, device_id, 'target_temperature_f', cfg['COOL_TARGET'])
+                log.info("Switch from {} to cool to {}".format(mode, cfg['COOL_TARGET']))
 
     lastmode = mode
     lasttarg = target
