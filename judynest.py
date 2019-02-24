@@ -2,7 +2,7 @@
 This program is for managing a Nest thermostat. The primary function is
 to switch between heat mode and cool mode. While the Nest has a native
 heat-cool mode, the interface for adjusting the temperature is too
-complicated for my Alzheimer's inflicted mother, as it requires
+complicated for my Alzheimer's afflicted mother, as it requires
 extra steps to select either the heat set point or the cool set point,
 and adjusting one can affect the other.
 
@@ -11,7 +11,35 @@ adjust the temperature to make herself comfortable. If the program
 detects that the house temperature is getting warmer than the heat
 set point warrants, it will switch to cool. Similarly, if the the
 house temperature is getting colder than the cool set point warrants,
-it will switch to heat.
+it will switch to heat. However, the program also looks at the outdoor
+temperature (which is retrieved per city code from openweathermap.org)
+and will only switch to heat of the outdoor temperature is below a
+configured threhold, or to cool if the outdoor temperature is above a
+configured threshold. (It is necessary to consider the outdoor temp
+to prevent switching to the wrong mode in response to Mom setting the
+target temperature to unreasonable extremes, which she does from time
+to time.) If for some reason we can't get the outdoor temperature,
+all mode changing decisions will be based only on the indoor ambient
+temperature and current target temp as set by Mom.
+
+Configuration must appear in JSON file, judynest.cfg and be of the
+following format (all temperatures in Fahrenheit):
+
+{
+    "CLIENT_ID" : <Nest thermostat device ID>,
+    "CLIENT_SECRET" : <Access code>,
+    "COOL_TARGET" : <Target temp to set for cool mode>,
+    "HEAT_TARGET" : <Target temp to set for heat mode>,
+    "MAX_ALLOWED_TEMP" : <Ambient temp at which to trigger cooling>,
+    "MIN_ALLOWED_TEMP" : <Ambient temp at which to trigger heating>,
+    "OUTDOOR_COOL_THRESH" : <Min outdoor temp allowable for cooling>,
+    "OUTDOOR_HEAT_THRESH" : <Max outdoor temp allowable for heating>,
+    "OWM" : {
+        "KEY" : <openweathermap.org user access key>,
+        "CITY_ID" : <openweathermap.org city code> 
+    }
+}
+
 
 This program uses the requests library for interacting with the Nest
 RESTful API. Note that Nest API accesses cause an HTTP redirect. The 
@@ -19,6 +47,21 @@ requests library will not replicate the authentication information on
 the redirect, causing API accesses to fail. A workaround is described 
 here: https://github.com/requests/requests/issues/2949
 and this is what I've implemented.
+
+HISTORY:
+    1.0 06/28/2018  Original release
+
+    1.1 01/18/2019  Mom was turning the heat up to 80, which exceeded
+                    the allowed max, causing the program to switch
+                    from heat to cool to the cool target. This cooled
+                    the house, which is not what she wanted and she
+                    would go to battle, setting the thermostat
+                    higher and higher. To address this, we now
+                    incorporate looking at the outside temperature
+                    to determine if the heat or cool should be on.
+                    The Nest API does not provide outside temperatures
+                    (even though it is displayed on the interface),
+                    so we use OpenWeatherMap.org to get the data.
 
 TODO:
     7. Notifications via SMS (twilio.com)
@@ -37,7 +80,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.0 (6/24/2018)"
+Version = "1.1 (2/18/2019)"
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
@@ -48,6 +91,10 @@ MIN_POLL_TIME = 5
 AUTH_URL = 'https://api.home.nest.com/oauth2/access_token'
 API_URL = "https://developer-api.nest.com"
 HTTP_TIMEOUT = 30
+
+# OpenWeatherMap
+OWM_URL = 'http://api.openweathermap.org/data/2.5/weather'
+OWM_POLL_TIME = 30 # seconds
 
 # File names
 CFG_FILE = "judynest.cfg"
@@ -288,6 +335,49 @@ def set_device(token, device_id, parm, value):
     return True
 
 
+def get_outdoor_temp():
+
+    parms = {}
+    parms['units'] = 'Imperial'
+    parms['id'] = cfg['OWM']['CITY_ID']
+    parms['appid'] = cfg['OWM']['KEY']
+
+    try:
+        response = requests.get(OWM_URL, 
+                                params = parms,
+                                allow_redirects=False,
+                                timeout=HTTP_TIMEOUT)
+    except (requests.Timeout, requests.ConnectionError) as err:
+        log.error("Get request timed out on url '%s'" % OWM_URL)
+        log.error("Get time out error: %s" % err)
+        return None
+    else:
+        resp_data = json.loads(response.text)
+        if response.status_code != 200:
+            pp = pprint.PrettyPrinter(indent=4)
+            rsp = pp.pformat(resp_data)
+            log.error("Get request response code: %d" % response.status_code)
+            log.error("Get response message: %s" % rsp)
+            log.critical("Terminating program.")
+            exit()
+        else:
+            # Success
+            return resp_data['main']['temp']
+
+
+def set_heat(token, device_id, mode, cfg):
+    if (set_device(token, device_id, 'hvac_mode', 'heat')):
+        set_device(token, device_id, 'target_temperature_f', cfg['HEAT_TARGET'])
+        log.info("Switch from {} to heat to {}".format(mode, cfg['HEAT_TARGET']))
+
+
+def set_cool(token, device_id, mode, cfg):
+    if (set_device(token, device_id, 'hvac_mode', 'cool')):
+        set_device(token, device_id, 'target_temperature_f', cfg['COOL_TARGET'])
+        log.info("Switch from {} to cool to {}".format(mode, cfg['COOL_TARGET']))
+
+
+
 ################################
 # main
 ################################
@@ -365,6 +455,8 @@ lastenab = True
 open(ENABLE_FILE, 'w').close()
 
 init = True
+outdoorCheckTime = 0
+outdoor = 0
 
 # Loop forever, monitoring the thermostat and making adjustments
 # as needed.
@@ -394,28 +486,37 @@ while (True):
     target = stat['target_temperature_f']
     device_id = stat['device_id']
 
+    nowTime = time.time()
+    if (nowTime - outdoorCheckTime > OWM_POLL_TIME):
+        outdoor = get_outdoor_temp()
+        outdoorCheckTime = nowTime
+
     if (mode != lastmode or target != lasttarg or ambient != lastamb):
-        log.info("Target={}, ambient={}, mode={}".format(target, ambient, mode))
+        log.info("Target={}, ambient={}, outdoor={}, mode={}"
+                .format(target, ambient, outdoor, mode))
 
     if (mode == 'heat' and mode == lastmode):
-        if (ambient > cfg['MAX_ALLOWED_TEMP'] or (ambient > target+2 and ambient > cfg['COOL_TARGET'])):
-            if (set_device(token, device_id, 'hvac_mode', 'cool')):
-                set_device(token, device_id, 'target_temperature_f', cfg['COOL_TARGET'])
-                log.info("Switch from {} to cool to {}".format(mode, cfg['COOL_TARGET']))
+        if (ambient > cfg['MAX_ALLOWED_TEMP'] or 
+                (ambient > target+2 and ambient > cfg['COOL_TARGET'])):
+            if (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']):
+                set_cool(token, device_id, mode, cfg)
     elif (mode == 'cool' and mode == lastmode):
-        if (ambient < cfg['MIN_ALLOWED_TEMP'] or (ambient < target-2 and ambient < cfg['HEAT_TARGET'])):
-            if (set_device(token, device_id, 'hvac_mode', 'heat')):
-                set_device(token, device_id, 'target_temperature_f', cfg['HEAT_TARGET'])
-                log.info("Switch from {} to heat to {}".format(mode, cfg['HEAT_TARGET']))
+        if (ambient < cfg['MIN_ALLOWED_TEMP'] or 
+                (ambient < target-2 and ambient < cfg['HEAT_TARGET'])):
+            if (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']):
+                set_heat(token, device_id, mode, cfg)
     elif ((mode == 'heat-cool' or mode == 'eco') and mode == lastmode):
-        if (ambient <= cfg['COOL_TARGET']):
-            if (set_device(token, device_id, 'hvac_mode', 'heat')):
-                set_device(token, device_id, 'target_temperature_f', cfg['HEAT_TARGET'])
-                log.info("Switch from {} to heat to {}".format(mode, cfg['HEAT_TARGET']))
+        if (outdoor != None):
+            if (outdoor <= cfg['OUTDOOR_HEAT_THRESH'] and 
+                    ambient <= cfg['COOL_TARGET']):
+                set_heat(token, device_id, mode, cfg)
+            else:
+                set_cool(token, device_id, mode, cfg)
         else:
-            if (set_device(token, device_id, 'hvac_mode', 'cool')):
-                set_device(token, device_id, 'target_temperature_f', cfg['COOL_TARGET'])
-                log.info("Switch from {} to cool to {}".format(mode, cfg['COOL_TARGET']))
+            if (ambient <= cfg['COOL_TARGET']):
+                set_heat(token, device_id, mode, cfg)
+            else:
+                set_cool(token, device_id, mode, cfg)
 
     lastmode = mode
     lasttarg = target
