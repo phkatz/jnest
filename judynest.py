@@ -51,7 +51,7 @@ and this is what I've implemented.
 HISTORY:
     1.0 06/28/2018  Original release
 
-    1.1 01/18/2019  Mom was turning the heat up to 80, which exceeded
+    1.1 02/24/2019  Mom was turning the heat up to 80, which exceeded
                     the allowed max, causing the program to switch
                     from heat to cool to the cool target. This cooled
                     the house, which is not what she wanted and she
