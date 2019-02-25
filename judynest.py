@@ -51,12 +51,12 @@ and this is what I've implemented.
 HISTORY:
     1.0 06/28/2018  Original release
 
-    1.1 02/24/2019  Mom was turning the heat up to 80, which exceeded
-                    the allowed max, causing the program to switch
-                    from heat to cool to the cool target. This cooled
-                    the house, which is not what she wanted and she
-                    would go to battle, setting the thermostat
-                    higher and higher. To address this, we now
+    1.1 02/24/2019  During cold weather, Mom was turning the heat up 
+                    to 80, which exceeded the allowed max, causing the 
+                    program to switch from heat to cool to the cool 
+                    target. This cooled the house, which is not what 
+                    she wanted and she would go to battle, setting the 
+                    thermostat higher and higher. To address this, we now
                     incorporate looking at the outside temperature
                     to determine if the heat or cool should be on.
                     The Nest API does not provide outside temperatures
@@ -80,7 +80,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.1 (2/18/2019)"
+Version = "1.1 (2/24/2019)"
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
