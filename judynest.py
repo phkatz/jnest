@@ -63,6 +63,9 @@ HISTORY:
                     (even though it is displayed on the interface),
                     so we use OpenWeatherMap.org to get the data.
 
+    1.2 02/25/2018  Add support for --outdoor option to test using a
+                    fake outdoor temperature.
+
 TODO:
     7. Notifications via SMS (twilio.com)
 
@@ -80,7 +83,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.1 (2/24/2019)"
+Version = "1.2 (2/25/2019)"
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
@@ -100,6 +103,7 @@ OWM_POLL_TIME = 30 # seconds
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
 ENABLE_FILE = "gojnest"
+OD_FILE = "outdoor.json"
 
 # Fake out stuff for fake mode
 FAKE_KEY = "c.fakekey123"
@@ -335,8 +339,40 @@ def set_device(token, device_id, parm, value):
     return True
 
 
+#############################################################
+# If the --outdoor option is specified, instead of getting
+# the outdoor temperature from OWM, just read it from a 
+# JSON file as a way of testing the logic that depends on
+# the outdoor temperature. The JSON file is of the format:
+#
+#   {
+#       "temp" : 68
+#   }
+#
+# where here we show 68 degrees F as an example, but any temp
+# can be specified.
+#############################################################
 def get_outdoor_temp():
 
+    if (args.outdoor):
+        # Do fake temperature reading from file
+        try:
+            odfile = open(OD_FILE, 'r')
+        except OSError:
+            log.error("Cannot open %s to read fake outdoor temp." % OD_FILE)
+            log.critical("Terminating program.")
+            exit()
+        else:
+            try:
+                od = json.load(odfile)
+            except json.decoder.JSONDecodeError as err:
+                log.error("Cannot parse fake outdoor temp from file '%s'" % OD_FILE)
+                log.error("Parsing error: %s" % err)
+                log.critical("Terminating program.")
+                exit()
+        return od['temp']
+
+    # Do real temperature reading
     parms = {}
     parms['units'] = 'Imperial'
     parms['id'] = cfg['OWM']['CITY_ID']
@@ -394,6 +430,10 @@ parser.add_argument('-d', '--debug',
 )
 parser.add_argument('-f', '--fake',
                     help="Fake calls to Nest API (to prevent blocking)",
+                    action="store_true"
+)
+parser.add_argument('-o', '--outdoor',
+                    help="Get outdoor temp from file outdoor.json",
                     action="store_true"
 )
 parser.add_argument('-r', '--rate',
