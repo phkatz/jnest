@@ -63,8 +63,10 @@ HISTORY:
                     (even though it is displayed on the interface),
                     so we use OpenWeatherMap.org to get the data.
 
-    1.2 02/25/2018  Add support for --outdoor option to test using a
+    1.2 02/25/2019  Add support for --outdoor option to test using a
                     fake outdoor temperature.
+
+    1.3 04/04/2019  Don't terminate on error from OWM.
 
 TODO:
     7. Notifications via SMS (twilio.com)
@@ -83,7 +85,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.2 (2/25/2019)"
+Version = "1.3 (4/4/2019)"
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
@@ -394,8 +396,7 @@ def get_outdoor_temp():
             rsp = pp.pformat(resp_data)
             log.error("Get request response code: %d" % response.status_code)
             log.error("Get response message: %s" % rsp)
-            log.critical("Terminating program.")
-            exit()
+            return None
         else:
             # Success
             return resp_data['main']['temp']
