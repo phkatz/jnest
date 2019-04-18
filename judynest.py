@@ -68,6 +68,12 @@ HISTORY:
 
     1.3 04/04/2019  Don't terminate on error from OWM.
 
+    1.4 04/17/2019  Make MAX_ALLOWED_TEMP be absolute regardless of
+                    outdoor temperature. We saw a case where outdoor
+                    was below the threshold, but the house was 81
+                    degrees, so cool would not go on. Do same for
+                    MIN_ALLOWED_TEMP and heating.
+
 TODO:
     7. Notifications via SMS (twilio.com)
 
@@ -85,7 +91,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.3 (4/4/2019)"
+Version = "1.4 (4/17/2019)"
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
@@ -538,14 +544,16 @@ while (True):
 
     if (mode == 'heat' and mode == lastmode):
         if (ambient > cfg['MAX_ALLOWED_TEMP'] or 
-                (ambient > target+2 and ambient > cfg['COOL_TARGET'])):
-            if (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']):
-                set_cool(token, device_id, mode, cfg)
+                (ambient > target+2 and 
+                 ambient > cfg['COOL_TARGET'] and
+                 (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
+            set_cool(token, device_id, mode, cfg)
     elif (mode == 'cool' and mode == lastmode):
         if (ambient < cfg['MIN_ALLOWED_TEMP'] or 
-                (ambient < target-2 and ambient < cfg['HEAT_TARGET'])):
-            if (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']):
-                set_heat(token, device_id, mode, cfg)
+                (ambient < target-2 and 
+                 ambient < cfg['HEAT_TARGET'] and
+                 (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
+            set_heat(token, device_id, mode, cfg)
     elif ((mode == 'heat-cool' or mode == 'eco') and mode == lastmode):
         if (outdoor != None):
             if (outdoor <= cfg['OUTDOOR_HEAT_THRESH'] and 
