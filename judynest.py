@@ -73,6 +73,8 @@ HISTORY:
                     was below the threshold, but the house was 81
                     degrees, so cool would not go on. Do same for
                     MIN_ALLOWED_TEMP and heating.
+    1.5 05/26/2020  Make program more resilient to errors returned
+                    from servers: don't just crash.
 
 TODO:
     7. Notifications via SMS (twilio.com)
@@ -91,7 +93,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.4 (4/17/2019)"
+Version = "1.5 (5/26/2020)"
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
