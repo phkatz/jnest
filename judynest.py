@@ -170,7 +170,13 @@ def get_access_token():
             log.critical("Terminating program.")
             exit()
 
-        resp_data = json.loads(response.text)
+        try:
+            resp_data = json.loads(response.text)
+        except json.decoder.JSONDecodeError as err:
+            log.error("Cannot parse JSON response in get_access_token: '{}'".format(response.text))
+            log.error("Parsing error: %s" % err)
+            log.critical("Terminating program.")
+            exit()
 
         if response.status_code != 200:
             pp = pprint.PrettyPrinter(indent=4)
@@ -240,7 +246,13 @@ def read_device(token):
                     log.error("Get timeout error: %s" % err)
                     return None
 
-            resp_data = json.loads(response.text)
+            try:
+                resp_data = json.loads(response.text)
+            except json.decoder.JSONDecodeError as err:
+                log.error("Cannot parse JSON response in read_device: '%s'" % response.text)
+                log.error("Parsing error: %s" % err)
+                return None
+
             if response.status_code != 200:
                 if (read_redirect_url is None or url != read_redirect_url):
                     # We didn't get a redirect, or we did and it didn't work
@@ -248,8 +260,7 @@ def read_device(token):
                     rsp = pp.pformat(resp_data)
                     log.error("Get request response code: %d" % response.status_code)
                     log.error("Get response message: %s" % rsp)
-                    log.critical("Terminating program.")
-                    exit()
+                    return None
                 else:
                     # We used the cached redirect and it didn't work, so
                     # try again with the official URL
@@ -325,7 +336,13 @@ def set_device(token, device_id, parm, value):
                     log.error("Put timeout error: %s" % err)
                     return False
                 
-            resp_data = json.loads(response.text)
+            try:
+                resp_data = json.loads(response.text)
+            except json.decoder.JSONDecodeError as err:
+                log.error("Cannot parse JSON response in set_device for parm '{}': '{}'".format(parm, response.text))
+                log.error("Parsing error: %s" % err)
+                return False
+
             if response.status_code != 200:
                 if (write_redirect_url is None or url != write_redirect_url):
                     # We didn't get a redirect, or we did and it didn't work
@@ -333,8 +350,7 @@ def set_device(token, device_id, parm, value):
                     rsp = pp.pformat(resp_data)
                     log.error("Put request response code: %d" % response.status_code)
                     log.error("Put response message: %s" % rsp)
-                    log.critical("Terminating program.")
-                    exit()
+                    return False
                 else:
                     # We used the cached redirect and it didn't work, so
                     # try again with the official URL
@@ -396,7 +412,13 @@ def get_outdoor_temp():
         log.error("Get time out error: %s" % err)
         return None
     else:
-        resp_data = json.loads(response.text)
+        try:
+            resp_data = json.loads(response.text)
+        except json.decoder.JSONDecodeError as err:
+            log.error("Cannot parse JSON response in get_outdoor_temp: '{}'".format(response.text))
+            log.error("Parsing error: %s" % err)
+            return None
+
         if response.status_code != 200:
             pp = pprint.PrettyPrinter(indent=4)
             rsp = pp.pformat(resp_data)
@@ -538,9 +560,14 @@ while (True):
         outdoor = get_outdoor_temp()
         outdoorCheckTime = nowTime
 
+    if (outdoor != None):
+        outdoors = outdoor
+    else:
+        outdoors = '(none)'
+
     if (mode != lastmode or target != lasttarg or ambient != lastamb):
         log.info("Target={}, ambient={}, outdoor={}, mode={}"
-                .format(target, ambient, outdoor, mode))
+                .format(target, ambient, outdoors, mode))
 
     if (mode == 'heat' and mode == lastmode):
         if (ambient > cfg['MAX_ALLOWED_TEMP'] or 
