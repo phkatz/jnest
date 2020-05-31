@@ -13,7 +13,7 @@ set point warrants, it will switch to cool. Similarly, if the the
 house temperature is getting colder than the cool set point warrants,
 it will switch to heat. However, the program also looks at the outdoor
 temperature (which is retrieved per city code from openweathermap.org)
-and will only switch to heat of the outdoor temperature is below a
+and will only switch to heat if the outdoor temperature is below a
 configured threhold, or to cool if the outdoor temperature is above a
 configured threshold. (It is necessary to consider the outdoor temp
 to prevent switching to the wrong mode in response to Mom setting the
@@ -21,6 +21,17 @@ target temperature to unreasonable extremes, which she does from time
 to time.) If for some reason we can't get the outdoor temperature,
 all mode changing decisions will be based only on the indoor ambient
 temperature and current target temp as set by Mom.
+
+In April/May of 2020, Mom now has full time caregivers in the house.
+Though they've been trained on the manual operation of the thermostat,
+there seems to be a lot of confusion around it. Additionally, I'm
+seeing cases where the thermostat is suddenly set to a set point of 
+50F in cool mode, which would of course make the house too cold. It
+is unknown how the thermostat gets into this state, whether it is a
+confused caregiver, a bug in the Nest or someone has hacked access
+to the Nest. Regardless, this program has been updated to look for
+this condition (as well as a high set point in heat mode) and reset
+the set point and mode appropriately.
 
 Configuration must appear in JSON file, judynest.cfg and be of the
 following format (all temperatures in Fahrenheit):
@@ -34,6 +45,8 @@ following format (all temperatures in Fahrenheit):
     "MIN_ALLOWED_TEMP" : <Ambient temp at which to trigger heating>,
     "OUTDOOR_COOL_THRESH" : <Min outdoor temp allowable for cooling>,
     "OUTDOOR_HEAT_THRESH" : <Max outdoor temp allowable for heating>,
+    "MIN_COOL_TARGET" : <Min allowed target temp in cool mode>,
+    "MAX_HEAT_TARGET" : <Max allowed target temp in heat mode>,
     "OWM" : {
         "KEY" : <openweathermap.org user access key>,
         "CITY_ID" : <openweathermap.org city code> 
@@ -75,6 +88,19 @@ HISTORY:
                     MIN_ALLOWED_TEMP and heating.
     1.5 05/26/2020  Make program more resilient to errors returned
                     from servers: don't just crash.
+    2.0 05/31/2020  Recover from finding the Nest in a non-sensical
+                    state (e.g., 50F set point in cool mode). This
+                    particular state has been observed several times
+                    since 2020 started, but it is not known how it
+                    gets into this state. This code change uses new
+                    cfg parameteters: MIN_COOL_TARGET and 
+                    MAX_HEAT_TARGET. If the device min of 50F or max
+                    of 90F is seen, then reset back to the configured
+                    target temp. If the target is beyond the MIN/MAX
+                    TARGET, but not at the device extremes, reset
+                    to the MIN/MAX TARGET. Also, make --fake and
+                    --outdoor options use file based data in a file
+                    called fake.json.
 
 TODO:
     7. Notifications via SMS (twilio.com)
@@ -93,10 +119,15 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "1.5 (5/26/2020)"
+Version = "2.0 (5/31/2020)"
+
+# Min and max target temps supported by the Nest
+DEVICE_MIN = 50
+DEVICE_MAX = 90
 
 LOGFILE = 'jnest.log'
 LOGFILESIZE = 500000
+
 
 POLL_TIME = 65
 MIN_POLL_TIME = 5
@@ -113,16 +144,7 @@ OWM_POLL_TIME = 30 # seconds
 CFG_FILE = "judynest.cfg"
 TKN_FILE = "judynest.tkn"
 ENABLE_FILE = "gojnest"
-OD_FILE = "outdoor.json"
-
-# Fake out stuff for fake mode
-FAKE_KEY = "c.fakekey123"
-fake_stats = {
-        'ambient_temperature_f': 70,
-        'hvac_mode': 'heat',
-        'target_temperature_f': 70,
-        'device_id': 'fake_device_123',
-}
+FAKEFILE = 'fake.json'
 
 read_redirect_url = None
 write_redirect_url = None
@@ -219,7 +241,7 @@ def read_device(token):
 
     if (args.fake):
         log.debug("Returning fake stats for fake mode.")
-        return fake_stats
+        return read_fake('device')
         
     # While loop is in case we need to retry due to 
     # cached redirect URL being stale.
@@ -305,8 +327,8 @@ def set_device(token, device_id, parm, value):
         url = write_redirect_url
 
     if (args.fake):
-        log.debug("Faking Put to set parameter.")
-        fake_stats[parm] = value
+        log.debug("Setting fake stats for fake mode.")
+        write_fake('device', parm, value)
         return True
 
     # While loop is in case we need to retry due to 
@@ -366,6 +388,80 @@ def set_device(token, device_id, parm, value):
 
 
 #############################################################
+# Read fake data from fake file.
+#
+# obj indicates what to read from the file:
+#
+#   outdoor: Outdoor temp in degrees F
+#
+#   device : {
+#               'ambient_temperature_f': 70,
+#               'hvac_mode': 'heat',
+#               'target_temperature_f': 70,
+#               'device_id': 'fake_device_123',
+#            }
+#############################################################
+def read_fake(obj):
+
+    with open(FAKEFILE, 'r') as fake_file:
+        try:
+            data = json.load(fake_file)
+        except json.decoder.JSONDecodeError as err:
+            log.error("Cannot parse fake file '%s'" % FAKEFILE)
+            log.error("Parsing error: %s" % err)
+            log.critical("Terminating program.")
+            exit()
+
+        return data[obj]
+
+
+#############################################################
+# Write fake data to fake file.
+#
+# obj indicates what to read from the file:
+#
+#   outdoor (value = Outdoor temp in degrees F)
+#   device (must specify parm)
+#
+# parm is only used for obj=device:
+#   'ambient_temperature_f' (value is a number)
+#   'hvac_mode' (value is a string: 'heat', 'cool)
+#   'target_temperature_f' (value is a number)
+#
+# value is the value to write to obj.parm and should be
+# specified as a number or string, depending on obj.parm.
+#############################################################
+def write_fake(obj, parm, value):
+
+    with open(FAKEFILE, 'r') as fake_file:
+        try:
+            data = json.load(fake_file)
+        except json.decoder.JSONDecodeError as err:
+            log.error("Cannot parse fake file '%s'" % FAKEFILE)
+            log.error("Parsing error: %s" % err)
+            log.critical("Terminating program.")
+            exit()
+
+        if (obj == 'outdoor'):
+            data[obj] = value
+        elif (obj == 'device'):
+            data[obj][parm] = value
+        else:
+            log.error("Unrecognized fake object: '{}'".format(obj))
+            log.critical("Terminating program.")
+            exit()
+
+        with open(FAKEFILE, 'w') as fake_file:
+            try:
+                json.dump(data, fake_file, indent=4)
+            except json.decoder.JSONDecodeError as err:
+                log.error("Cannot write data to i%s'" % FAKEFILE)
+                log.error("Parsing error: %s" % err)
+                log.critical("Terminating program.")
+                exit()
+
+
+#############################################################
 # If the --outdoor option is specified, instead of getting
 # the outdoor temperature from OWM, just read it from a 
 # JSON file as a way of testing the logic that depends on
@@ -382,21 +478,7 @@ def get_outdoor_temp():
 
     if (args.outdoor):
         # Do fake temperature reading from file
-        try:
-            odfile = open(OD_FILE, 'r')
-        except OSError:
-            log.error("Cannot open %s to read fake outdoor temp." % OD_FILE)
-            log.critical("Terminating program.")
-            exit()
-        else:
-            try:
-                od = json.load(odfile)
-            except json.decoder.JSONDecodeError as err:
-                log.error("Cannot parse fake outdoor temp from file '%s'" % OD_FILE)
-                log.error("Parsing error: %s" % err)
-                log.critical("Terminating program.")
-                exit()
-        return od['temp']
+        return read_fake('outdoor')
 
     # Do real temperature reading
     parms = {}
@@ -432,16 +514,32 @@ def get_outdoor_temp():
             return resp_data['main']['temp']
 
 
-def set_heat(token, device_id, mode, cfg):
+def set_heat(token, device_id, mode, cfg, new_targ=None):
+    if (mode == 'heat'):
+        action = "Override target heat temp"
+    else:
+        action = "Switch from {} to heat".format(mode)
+
+    if (new_targ == None):
+        new_targ = cfg['HEAT_TARGET']
+
     if (set_device(token, device_id, 'hvac_mode', 'heat')):
-        set_device(token, device_id, 'target_temperature_f', cfg['HEAT_TARGET'])
-        log.info("Switch from {} to heat to {}".format(mode, cfg['HEAT_TARGET']))
+        set_device(token, device_id, 'target_temperature_f', new_targ)
+        log.info("{} to {}".format(action, new_targ))
 
 
-def set_cool(token, device_id, mode, cfg):
+def set_cool(token, device_id, mode, cfg, new_targ=None):
+    if (mode == 'cool'):
+        action = "Override target cool temp"
+    else:
+        action = "Switch from {} to cool".format(mode)
+
+    if (new_targ == None):
+        new_targ = cfg['COOL_TARGET']
+
     if (set_device(token, device_id, 'hvac_mode', 'cool')):
-        set_device(token, device_id, 'target_temperature_f', cfg['COOL_TARGET'])
-        log.info("Switch from {} to cool to {}".format(mode, cfg['COOL_TARGET']))
+        set_device(token, device_id, 'target_temperature_f', new_targ)
+        log.info("{} to {}".format(action, new_targ))
 
 
 
@@ -464,7 +562,7 @@ parser.add_argument('-f', '--fake',
                     action="store_true"
 )
 parser.add_argument('-o', '--outdoor',
-                    help="Get outdoor temp from file outdoor.json",
+                    help="Get outdoor temp from file fake.json",
                     action="store_true"
 )
 parser.add_argument('-r', '--rate',
@@ -558,7 +656,13 @@ while (True):
     device_id = stat['device_id']
 
     nowTime = time.time()
-    if (nowTime - outdoorCheckTime > OWM_POLL_TIME):
+    if (args.outdoor and args.rate < OWM_POLL_TIME):
+        delta = args.rate
+    else:
+        delta = OWM_POLL_TIME
+
+    if (nowTime - outdoorCheckTime > delta):
+        log.debug("Calling get_outdoor_temp")
         outdoor = get_outdoor_temp()
         outdoorCheckTime = nowTime
 
@@ -571,18 +675,40 @@ while (True):
         log.info("Target={}, ambient={}, outdoor={}, mode={}"
                 .format(target, ambient, outdoors, mode))
 
+    # Handle heat mode
     if (mode == 'heat' and mode == lastmode):
         if (ambient > cfg['MAX_ALLOWED_TEMP'] or 
                 (ambient > target+2 and 
                  ambient > cfg['COOL_TARGET'] and
                  (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
             set_cool(token, device_id, mode, cfg)
+        elif (target > cfg['MAX_HEAT_TARGET']):
+            if (target == DEVICE_MAX):
+                new_targ = cfg['HEAT_TARGET']
+            else:
+                new_targ = cfg['MAX_HEAT_TARGET']
+            set_heat(token, device_id, mode, cfg, new_targ)
+        elif (ambient < cfg['MIN_ALLOWED_TEMP'] and target < cfg['MIN_ALLOWED_TEMP']):
+            set_heat(token, device_id, mode, cfg, cfg['HEAT_TARGET'])
+
+
+    # Handle cool mode
     elif (mode == 'cool' and mode == lastmode):
         if (ambient < cfg['MIN_ALLOWED_TEMP'] or 
                 (ambient < target-2 and 
                  ambient < cfg['HEAT_TARGET'] and
                  (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
             set_heat(token, device_id, mode, cfg)
+        elif (target < cfg['MIN_COOL_TARGET']):
+            if (target == DEVICE_MIN):
+                new_targ = cfg['COOL_TARGET']
+            else:
+                new_targ = cfg['MIN_COOL_TARGET']
+            set_cool(token, device_id, mode, cfg, new_targ)
+        elif (ambient > cfg['MAX_ALLOWED_TEMP'] and target > cfg['MAX_ALLOWED_TEMP']):
+            set_cool(token, device_id, mode, cfg, cfg['COOL_TARGET'])
+
+    # Handle all other modes
     elif ((mode == 'heat-cool' or mode == 'eco') and mode == lastmode):
         if (outdoor != None):
             if (outdoor <= cfg['OUTDOOR_HEAT_THRESH'] and 
