@@ -88,19 +88,25 @@ HISTORY:
                     MIN_ALLOWED_TEMP and heating.
     1.5 05/26/2020  Make program more resilient to errors returned
                     from servers: don't just crash.
-    2.0 05/31/2020  Recover from finding the Nest in a non-sensical
-                    state (e.g., 50F set point in cool mode). This
-                    particular state has been observed several times
-                    since 2020 started, but it is not known how it
-                    gets into this state. This code change uses new
-                    cfg parameteters: MIN_COOL_TARGET and 
-                    MAX_HEAT_TARGET. If the device min of 50F or max
-                    of 90F is seen, then reset back to the configured
-                    target temp. If the target is beyond the MIN/MAX
-                    TARGET, but not at the device extremes, reset
-                    to the MIN/MAX TARGET. Also, make --fake and
-                    --outdoor options use file based data in a file
-                    called fake.json.
+    2.0 05/31/2020  - Recover from finding the Nest in a non-sensical
+                      state (e.g., 50F set point in cool mode). This
+                      particular state has been observed several times
+                      since 2020 started, but it is not known how it
+                      gets into this state. This code change uses new
+                      cfg parameteters: MIN_COOL_TARGET and 
+                      MAX_HEAT_TARGET. If the device min of 50F or max
+                      of 90F is seen, then reset back to the configured
+                      target temp. If the target is beyond the MIN/MAX
+                      TARGET, but not at the device extremes, reset
+                      to the MIN/MAX TARGET. 
+                    - Make --fake and --outdoor options use file based 
+                      data in a file called fake.json.
+    2.1 06/06/2020  - If MIN_COOL_TARGET or MAX_HEAT_TARGET is exceeded,
+                      revert to COOL_TARGET/HEAT_TARGET regardless of
+                      what the target temperature was.
+                    - When --fake is used, force --outdoor on.
+                    - Force log of outdoor temp to no decimal places
+                      to maintain column alignment (and be sensible).
 
 TODO:
     7. Notifications via SMS (twilio.com)
@@ -119,7 +125,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "2.0 (5/31/2020)"
+Version = "2.1 (6/06/2020)"
 
 # Min and max target temps supported by the Nest
 DEVICE_MIN = 50
@@ -558,11 +564,11 @@ parser.add_argument('-d', '--debug',
                     default=logging.INFO,
 )
 parser.add_argument('-f', '--fake',
-                    help="Fake calls to Nest API (to prevent blocking)",
+                    help="Fake calls to Nest API (to prevent blocking) and force -o",
                     action="store_true"
 )
 parser.add_argument('-o', '--outdoor',
-                    help="Get outdoor temp from file fake.json",
+                    help="Get outdoor temp from file fake.json (forced by -f)",
                     action="store_true"
 )
 parser.add_argument('-r', '--rate',
@@ -579,6 +585,9 @@ args = parser.parse_args()
 # If using a short poll rate, force --fake to prevent blocking
 if (args.rate < MIN_POLL_TIME):
     args.fake = True
+
+if (args.fake):
+    args.outdoor = True
 
 # Set up logger
 log = logging.getLogger('')
@@ -672,7 +681,7 @@ while (True):
         outdoors = '(none)'
 
     if (mode != lastmode or target != lasttarg or ambient != lastamb):
-        log.info("Target={}, ambient={}, outdoor={}, mode={}"
+        log.info("Target={}, ambient={}, outdoor={:.0f}, mode={}"
                 .format(target, ambient, outdoors, mode))
 
     # Handle heat mode
@@ -683,10 +692,7 @@ while (True):
                  (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
             set_cool(token, device_id, mode, cfg)
         elif (target > cfg['MAX_HEAT_TARGET']):
-            if (target == DEVICE_MAX):
-                new_targ = cfg['HEAT_TARGET']
-            else:
-                new_targ = cfg['MAX_HEAT_TARGET']
+            new_targ = cfg['HEAT_TARGET']
             set_heat(token, device_id, mode, cfg, new_targ)
         elif (ambient < cfg['MIN_ALLOWED_TEMP'] and target < cfg['MIN_ALLOWED_TEMP']):
             set_heat(token, device_id, mode, cfg, cfg['HEAT_TARGET'])
@@ -700,10 +706,7 @@ while (True):
                  (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
             set_heat(token, device_id, mode, cfg)
         elif (target < cfg['MIN_COOL_TARGET']):
-            if (target == DEVICE_MIN):
-                new_targ = cfg['COOL_TARGET']
-            else:
-                new_targ = cfg['MIN_COOL_TARGET']
+            new_targ = cfg['COOL_TARGET']
             set_cool(token, device_id, mode, cfg, new_targ)
         elif (ambient > cfg['MAX_ALLOWED_TEMP'] and target > cfg['MAX_ALLOWED_TEMP']):
             set_cool(token, device_id, mode, cfg, cfg['COOL_TARGET'])
