@@ -46,7 +46,9 @@ following format (all temperatures in Fahrenheit):
     "OUTDOOR_COOL_THRESH" : <Min outdoor temp allowable for cooling>,
     "OUTDOOR_HEAT_THRESH" : <Max outdoor temp allowable for heating>,
     "MIN_COOL_TARGET" : <Min allowed target temp in cool mode>,
+    "MAX_COOL_TARGET" : <Max allowed target temp in cool mode>,
     "MAX_HEAT_TARGET" : <Max allowed target temp in heat mode>,
+    "MIN_HEAT_TARGET" : <Min allowed target temp in heat mode>,
     "OWM" : {
         "KEY" : <openweathermap.org user access key>,
         "CITY_ID" : <openweathermap.org city code> 
@@ -107,6 +109,10 @@ HISTORY:
                     - When --fake is used, force --outdoor on.
                     - Force log of outdoor temp to no decimal places
                       to maintain column alignment (and be sensible).
+    2.2 06/08/2020  - Regardless of ambient temp, if the cool target
+                      exceeds MAX_COOL_TARGET or heat target exceeds
+                      MIN_HEAT_TARGET (both parameters just added),
+                      then reset to COOL_TARGET/HEAT_TARGET.
 
 TODO:
     7. Notifications via SMS (twilio.com)
@@ -125,7 +131,7 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "2.1 (6/06/2020)"
+Version = "2.2 (6/08/2020)"
 
 # Min and max target temps supported by the Nest
 DEVICE_MIN = 50
@@ -691,11 +697,9 @@ while (True):
                  ambient > cfg['COOL_TARGET'] and
                  (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
             set_cool(token, device_id, mode, cfg)
-        elif (target > cfg['MAX_HEAT_TARGET']):
+        elif (target > cfg['MAX_HEAT_TARGET'] or
+              target < cfg['MIN_HEAT_TARGET']):
             set_heat(token, device_id, mode, cfg, cfg['HEAT_TARGET'])
-        elif (ambient < cfg['MIN_ALLOWED_TEMP'] and target < cfg['MIN_ALLOWED_TEMP']):
-            set_heat(token, device_id, mode, cfg, cfg['HEAT_TARGET'])
-
 
     # Handle cool mode
     elif (mode == 'cool' and mode == lastmode):
@@ -704,9 +708,8 @@ while (True):
                  ambient < cfg['HEAT_TARGET'] and
                  (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
             set_heat(token, device_id, mode, cfg)
-        elif (target < cfg['MIN_COOL_TARGET']):
-            set_cool(token, device_id, mode, cfg, cfg['COOL_TARGET'])
-        elif (ambient > cfg['MAX_ALLOWED_TEMP'] and target > cfg['MAX_ALLOWED_TEMP']):
+        elif (target < cfg['MIN_COOL_TARGET'] or
+              target > cfg['MAX_COOL_TARGET']):
             set_cool(token, device_id, mode, cfg, cfg['COOL_TARGET'])
 
     # Handle all other modes
