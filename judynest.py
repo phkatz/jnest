@@ -692,8 +692,7 @@ while (True):
                  (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
             set_cool(token, device_id, mode, cfg)
         elif (target > cfg['MAX_HEAT_TARGET']):
-            new_targ = cfg['HEAT_TARGET']
-            set_heat(token, device_id, mode, cfg, new_targ)
+            set_heat(token, device_id, mode, cfg, cfg['HEAT_TARGET'])
         elif (ambient < cfg['MIN_ALLOWED_TEMP'] and target < cfg['MIN_ALLOWED_TEMP']):
             set_heat(token, device_id, mode, cfg, cfg['HEAT_TARGET'])
 
@@ -706,8 +705,7 @@ while (True):
                  (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
             set_heat(token, device_id, mode, cfg)
         elif (target < cfg['MIN_COOL_TARGET']):
-            new_targ = cfg['COOL_TARGET']
-            set_cool(token, device_id, mode, cfg, new_targ)
+            set_cool(token, device_id, mode, cfg, cfg['COOL_TARGET'])
         elif (ambient > cfg['MAX_ALLOWED_TEMP'] and target > cfg['MAX_ALLOWED_TEMP']):
             set_cool(token, device_id, mode, cfg, cfg['COOL_TARGET'])
 
