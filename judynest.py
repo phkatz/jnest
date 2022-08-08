@@ -33,6 +33,12 @@ to the Nest. Regardless, this program has been updated to look for
 this condition (as well as a high set point in heat mode) and reset
 the set point and mode appropriately.
 
+In August 2022, it was conclusively proven that the sudden changes in
+set point was the work of the thermostat itself, even when taken off
+wifi. Solution is to hold the temperature at 75 for heat mode and only
+allow a manual adjustment to 76, and hold the temperature to 76 for
+air and only allow a manual adjustment to 77.
+
 Configuration must appear in JSON file, judynest.cfg and be of the
 following format (all temperatures in Fahrenheit):
 
@@ -113,11 +119,18 @@ HISTORY:
                       exceeds MAX_COOL_TARGET or heat target exceeds
                       MIN_HEAT_TARGET (both parameters just added),
                       then reset to COOL_TARGET/HEAT_TARGET.
+    2.3 08/08/2022  - Regardless of ambient temp, keep heat set point
+                      at 75, and only allow a manual adjustment to
+                      76, and keep cool set point at 76 and only
+                      allow a manual adjustment to 77.
 
 TODO:
     7. Notifications via SMS (twilio.com)
 
 """
+
+Version = "2.3 (8/08/2022)"
+
 
 import os
 import sys
@@ -131,7 +144,6 @@ import argparse
 
 from logging.handlers import RotatingFileHandler
 
-Version = "2.2 (6/08/2020)"
 
 # Min and max target temps supported by the Nest
 DEVICE_MIN = 50
@@ -692,10 +704,11 @@ while (True):
 
     # Handle heat mode
     if (mode == 'heat' and mode == lastmode):
-        if (ambient > cfg['MAX_ALLOWED_TEMP'] or 
-                (ambient > target+2 and 
-                 ambient > cfg['COOL_TARGET'] and
-                 (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
+#        if (ambient > cfg['MAX_ALLOWED_TEMP'] or 
+#                (ambient > target+2 and 
+#                 ambient > cfg['COOL_TARGET'] and
+#                 (outdoor == None or outdoor >= cfg['OUTDOOR_COOL_THRESH']))):
+        if (ambient > cfg['MAX_ALLOWED_TEMP']):
             set_cool(token, device_id, mode, cfg)
         elif (target > cfg['MAX_HEAT_TARGET'] or
               target < cfg['MIN_HEAT_TARGET']):
@@ -703,10 +716,11 @@ while (True):
 
     # Handle cool mode
     elif (mode == 'cool' and mode == lastmode):
-        if (ambient < cfg['MIN_ALLOWED_TEMP'] or 
-                (ambient < target-2 and 
-                 ambient < cfg['HEAT_TARGET'] and
-                 (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
+#        if (ambient < cfg['MIN_ALLOWED_TEMP'] or 
+#                (ambient < target-2 and 
+#                 ambient < cfg['HEAT_TARGET'] and
+#                 (outdoor == None or outdoor <= cfg['OUTDOOR_HEAT_THRESH']))):
+        if (ambient < cfg['MIN_ALLOWED_TEMP']):
             set_heat(token, device_id, mode, cfg)
         elif (target < cfg['MIN_COOL_TARGET'] or
               target > cfg['MAX_COOL_TARGET']):
